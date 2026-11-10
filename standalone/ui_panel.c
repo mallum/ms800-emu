@@ -11,7 +11,6 @@
  * be decoded the panel falls back to plain rectangles so it stays usable.
  */
 #include "ui_panel.h"
-#include "bus.h"
 #include <stdio.h>
 
 /* Visual grid column -> (top button, bottom button) logical index.
@@ -19,11 +18,11 @@
    (see the enum in ui_panel.h), so this mapping is explicit rather than
    computed by offset. */
 static const struct { int top_idx, bot_idx; } grid[BTN_COLS] = {
-    { BTN_CHANNEL,    BTN_FUNCTION  },
-    { BTN_PATCH,      BTN_PARAM     },
-    { BTN_UP,         BTN_DOWN      },
-    { BTN_UP_UP,      BTN_DOWN_DOWN },
-    { BTN_NEXT_PARAM, BTN_ENTER     },
+    { MS800_BTN_CHANNEL,    MS800_BTN_FUNCTION  },
+    { MS800_BTN_PATCH,      MS800_BTN_PARAM     },
+    { MS800_BTN_UP,         MS800_BTN_DOWN      },
+    { MS800_BTN_UP_UP,      MS800_BTN_DOWN_DOWN },
+    { MS800_BTN_NEXT_PARAM, MS800_BTN_ENTER     },
 };
 
 static SDL_Texture *tex_panel, *tex_sprites;
@@ -61,7 +60,7 @@ static void sprite(SDL_Renderer *ren, int sx, int w, int h, int x, int y) {
     SDL_RenderCopy(ren, tex_sprites, &src, &dst);
 }
 
-static void draw_plain(SDL_Renderer *ren, int powered_on) {
+static void draw_plain(SDL_Renderer *ren, const ms800_t *m, int powered_on) {
     SDL_SetRenderDrawColor(ren, 52, 55, 60, 255);
     SDL_RenderClear(ren);
     SDL_Rect sw = { SWITCH_X, SWITCH_Y, SWITCH_W, SWITCH_H };
@@ -71,23 +70,23 @@ static void draw_plain(SDL_Renderer *ren, int powered_on) {
         int ids[2] = { grid[i].top_idx, grid[i].bot_idx }, ys[2] = { ROW1_Y, ROW2_Y };
         for (int r = 0; r < 2; r++) {
             SDL_Rect b = { col_x(i), ys[r], BTN_W, BTN_H };
-            int hot = bus_button_state[ids[r]];
+            int hot = ms800_button(m, ids[r]);
             SDL_SetRenderDrawColor(ren, hot ? 30 : 60, hot ? 31 : 62, hot ? 34 : 68, 255);
             SDL_RenderFillRect(ren, &b);
         }
     }
 }
 
-void ui_panel_draw(SDL_Renderer *ren, uint8_t display_byte, int powered_on) {
-    if (!tex_panel) { draw_plain(ren, powered_on); return; }
+void ui_panel_draw(SDL_Renderer *ren, const ms800_t *m, uint8_t display_byte, int powered_on) {
+    if (!tex_panel) { draw_plain(ren, m, powered_on); return; }
 
     SDL_RenderCopy(ren, tex_panel, NULL, NULL);
 
     sprite(ren, powered_on ? SPR_ROCKER_ON_X : SPR_ROCKER_OFF_X, SWITCH_W, SWITCH_H, SWITCH_X, SWITCH_Y);
 
     for (int i = 0; i < BTN_COLS; i++) {
-        if (bus_button_state[grid[i].top_idx]) sprite(ren, SPR_KEYDOWN_X, BTN_W, BTN_H, col_x(i), ROW1_Y);
-        if (bus_button_state[grid[i].bot_idx]) sprite(ren, SPR_KEYDOWN_X, BTN_W, BTN_H, col_x(i), ROW2_Y);
+        if (ms800_button(m, grid[i].top_idx)) sprite(ren, SPR_KEYDOWN_X, BTN_W, BTN_H, col_x(i), ROW1_Y);
+        if (ms800_button(m, grid[i].bot_idx)) sprite(ren, SPR_KEYDOWN_X, BTN_W, BTN_H, col_x(i), ROW2_Y);
     }
 
     /* Lit digits are black-backed with glow, so add them over the red filter. */

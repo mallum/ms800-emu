@@ -1,0 +1,8 @@
+# Build output (configure out of tree or in build/)
+build/
+
+# macOS
+.DS_Store
+
+# ROM dumps are copyrighted; keep them out of the repository
+roms/*.bin

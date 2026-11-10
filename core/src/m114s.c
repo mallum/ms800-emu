@@ -25,52 +25,6 @@
 #define FRAC_ONE   (1 << FRAC_BITS)
 #define FRAC_MASK  (FRAC_ONE - 1)
 
-typedef struct {
-    uint8_t  reread;          /* # of times to re-read each byte (interpolated) */
-    uint32_t start_address;   /* offset into wave ROM */
-    uint16_t length;          /* table length in samples, before repetition */
-    uint16_t total_length;    /* length * reread */
-} M114STable;
-
-typedef struct {
-    uint8_t  atten;
-    uint8_t  outputs;
-    uint8_t  table1_addr;
-    uint8_t  table2_addr;
-    uint8_t  table_len;
-    uint8_t  read_meth;
-    uint8_t  interp;
-    int      env_enable;
-    int      oct_divisor;
-    uint8_t  frequency;
-} M114SChannelRegs;
-
-typedef struct {
-    M114SChannelRegs regs;
-    int         active;
-    int32_t     output[4096];   /* per chip sample: DAC value x4 x (volume+1) */
-    uint32_t    outpos;
-    int         prev_volume;
-    int         current_volume;
-    int         target_volume;
-    int         step_rate_volume_env;
-    M114STable  table1, table2;
-    uint32_t    incr;
-} M114SChannel;
-
-static struct {
-    int              bytes_read;
-    int              channel;
-    M114SChannelRegs tempch_regs;
-    M114SChannel     channels[M114S_CHANNELS];
-    const int8_t    *rom;
-    int              rom_size;
-    int              is_M114A;
-    double           reset_cycles;   /* chip-clock cycles of silence before auto-reset */
-    uint64_t         chip_cycles;    /* running chip clock, advanced by m114s_advance_cycles() */
-    uint64_t         last_write_cycle;
-} chip;
-
 /* Table 1/2 repeat count per read-method mode */
 static const int mode_to_rep[8][2] = {
     {2,2}, {1,1}, {4,4}, {1,1}, {1,2}, {1,1}, {1,4}, {1,1}
@@ -101,7 +55,6 @@ static const int mode_to_len_t2[8][8] = {
    i.e. ~0.30 dB per code (the datasheet's table gives 0.75 dB). Code $3F
    switches the channel off. Filled in by m114s_init(). */
 #define ATTEN_DB_PER_STEP 0.30
-static int v_linear[64];
 
 /* Frequency tables, straight from the M114S datasheet (4MHz = M114A part
    fitted to the MS800; the 6MHz M114AF table is kept for completeness). */
@@ -180,49 +133,59 @@ static const double freqtable6Mhz[256] = {
    waveform w lives at w * 0x100: low-note version at +0, high at +0x80.
    Starts as identity so the chip addresses the ROM directly until the
    firmware loads it. */
-static uint8_t addr_map[64];
+void m114s_map_write(M114S *chip, int index, uint8_t value) { chip->addr_map[index & 63] = value; }
 
-void m114s_map_write(int index, uint8_t value) { addr_map[index & 63] = value; }
-
-static int map_address(int m114_addr) {
-    return (addr_map[(m114_addr >> 9) & 63] << 7) | (m114_addr & 0x7F);
+static int map_address(const M114S *chip, int m114_addr) {
+    return (chip->addr_map[(m114_addr >> 9) & 63] << 7) | (m114_addr & 0x7F);
 }
 
-static void init_output_filter(void);
+static void init_output_filter(M114S *chip);
 
-static int debug_en = 0;
-void m114s_debug(int on) { debug_en = on; }
+void m114s_debug(M114S *chip, int on) { chip->debug = on; }
 
 static void init_channel(M114SChannel *ch) { memset(ch, 0, sizeof(*ch)); }
 
-static void init_all_channels(void) {
-    for (int i = 0; i < M114S_CHANNELS; i++) init_channel(&chip.channels[i]);
-    memset(&chip.tempch_regs, 0, sizeof(chip.tempch_regs));
-    chip.channel    = 0;
-    chip.bytes_read = 0;
+static void init_all_channels(M114S *chip) {
+    for (int i = 0; i < M114S_CHANNELS; i++) init_channel(&chip->channels[i]);
+    memset(&chip->tempch_regs, 0, sizeof(chip->tempch_regs));
+    chip->channel    = 0;
+    chip->bytes_read = 0;
 }
 
-void m114s_init(const uint8_t *wave_rom, int rom_size, int clock_hz) {
-    memset(&chip, 0, sizeof(chip));
-    for (int i = 0; i < 64; i++) addr_map[i] = (uint8_t)(i << 2);
+void m114s_init(M114S *chip, const uint8_t *wave_rom, int rom_size, int clock_hz, double sample_rate) {
+    memset(chip, 0, sizeof(*chip));
+    for (int i = 0; i < 64; i++) chip->addr_map[i] = (uint8_t)(i << 2);
     for (int i = 0; i < 64; i++)
-        v_linear[i] = (int)(1023.0 * pow(10.0, -ATTEN_DB_PER_STEP * i / 20.0) + 0.5);
-    chip.rom      = (const int8_t *)wave_rom;
-    chip.rom_size = rom_size;
+        chip->v_linear[i] = (int)(1023.0 * pow(10.0, -ATTEN_DB_PER_STEP * i / 20.0) + 0.5);
+    chip->rom      = (const int8_t *)wave_rom;
+    chip->rom_size = rom_size;
     if (clock_hz == 6000000 || clock_hz == 5994560) {
-        chip.is_M114A     = 0;
-        chip.reset_cycles = clock_hz * 0.000085;  /* M114AF resets after 85us idle */
+        chip->is_M114A     = 0;
+        chip->reset_cycles = clock_hz * 0.000085;  /* M114AF resets after 85us idle */
     } else {
-        chip.is_M114A     = 1;
-        chip.reset_cycles = 4000000 * 0.000128;   /* M114A resets after 128us idle */
+        chip->is_M114A     = 1;
+        chip->reset_cycles = 4000000 * 0.000128;   /* M114A resets after 128us idle */
     }
-    init_all_channels();
-    init_output_filter();
+    chip->sample_rate = sample_rate;
+    init_all_channels(chip);
+    init_output_filter(chip);
 }
 
-void m114s_reset(void) { init_all_channels(); }
+void m114s_reset(M114S *chip) { init_all_channels(chip); }
 
-void m114s_advance_cycles(uint64_t chip_cycles) { chip.chip_cycles += chip_cycles; }
+void m114s_advance_cycles(M114S *chip, uint64_t chip_cycles) { chip->chip_cycles += chip_cycles; }
+
+/* Phase increment per host sample for a table of the given frequency. */
+static uint32_t calc_incr(const M114S *chip, double freq_hz) {
+    return (uint32_t)(freq_hz * ((double)(16u << FRAC_BITS) / chip->sample_rate));
+}
+
+void m114s_set_sample_rate(M114S *chip, double sample_rate) {
+    chip->sample_rate = sample_rate;
+    for (int c = 0; c < M114S_CHANNELS; c++)
+        chip->channels[c].incr = calc_incr(chip, chip->channels[c].freq_hz);
+    init_output_filter(chip);
+}
 
 /* Build one full table period of DAC input values.
    The MS800 wave ROM holds plain signed 8-bit samples (checked against
@@ -240,18 +203,18 @@ static void fill_table(int16_t *tb, const int8_t *src, int len, int rep) {
     }
 }
 
-static void read_table(M114SChannel *ch) {
-    const int8_t *rom = chip.rom;
+static void read_table(M114S *chip, M114SChannel *ch) {
+    const int8_t *rom = chip->rom;
     int t1s = (int)ch->table1.start_address, t2s = (int)ch->table2.start_address;
     int lent1 = ch->table1.length, lent2 = ch->table2.length;
     int rep1 = ch->table1.reread, rep2 = ch->table2.reread;
     int intp = ch->regs.interp;
-    static int16_t tb1[4096], tb2[4096];   /* samples x4 */
-    memset(tb1, 0, sizeof(tb1));
-    memset(tb2, 0, sizeof(tb2));
+    int16_t *tb1 = chip->tb1, *tb2 = chip->tb2;   /* samples x4 */
+    memset(chip->tb1, 0, sizeof(chip->tb1));
+    memset(chip->tb2, 0, sizeof(chip->tb2));
 
-    if (t1s < 0 || t1s + lent1 > chip.rom_size) return;
-    if (t2s < 0 || t2s + lent2 > chip.rom_size) return;
+    if (t1s < 0 || t1s + lent1 > chip->rom_size) return;
+    if (t2s < 0 || t2s + lent2 > chip->rom_size) return;
 
     fill_table(tb1, &rom[t1s], lent1, rep1);
     fill_table(tb2, &rom[t2s], lent2, rep2);
@@ -280,15 +243,15 @@ static void process_freq_codes(M114SChannel *ch) {
     }
 }
 
-static void process_channel_data(void) {
-    M114SChannel *ch = &chip.channels[chip.channel];
-    chip.bytes_read = 0;
-    memcpy(&ch->regs, &chip.tempch_regs, sizeof(chip.tempch_regs));
+static void process_channel_data(M114S *chip) {
+    M114SChannel *ch = &chip->channels[chip->channel];
+    chip->bytes_read = 0;
+    memcpy(&ch->regs, &chip->tempch_regs, sizeof(chip->tempch_regs));
 
-    if (debug_en) {
+    if (chip->debug) {
         fprintf(stderr,
             "M114S ch%02d: atten=%02X freq=%02X t1=%02X t2=%02X len=%d meth=%d interp=%d oct=%d env=%d out=%d\n",
-            chip.channel, ch->regs.atten, ch->regs.frequency,
+            chip->channel, ch->regs.atten, ch->regs.frequency,
             ch->regs.table1_addr, ch->regs.table2_addr, ch->regs.table_len,
             ch->regs.read_meth, ch->regs.interp, ch->regs.oct_divisor,
             ch->regs.env_enable, ch->regs.outputs);
@@ -313,17 +276,18 @@ static void process_channel_data(void) {
     int t2start = ((ch->regs.table2_addr << 7) & (~(lent2 - 1) & 0x7FFF)) | (lent2 <= 16 ? 0x10 : 0);
     /* The MS800 only uses 128-byte tables (band codes at $EAD3), so the
        mapped 128-byte block holds the whole table. */
-    t1start = map_address(t1start);
-    t2start = map_address(t2start);
-    if (debug_en) fprintf(stderr, "M114S ch%02d:   -> wave ROM t1=$%04X t2=$%04X\n", chip.channel, t1start, t2start);
+    t1start = map_address(chip, t1start);
+    t2start = map_address(chip, t2start);
+    if (chip->debug) fprintf(stderr, "M114S ch%02d:   -> wave ROM t1=$%04X t2=$%04X\n", chip->channel, t1start, t2start);
 
-    double freq = chip.is_M114A ? freqtable4Mhz[ch->regs.frequency] : freqtable6Mhz[ch->regs.frequency];
+    double freq = chip->is_M114A ? freqtable4Mhz[ch->regs.frequency] : freqtable6Mhz[ch->regs.frequency];
 
-    ch->target_volume = v_linear[ch->regs.atten & 0x3F];
+    ch->target_volume = chip->v_linear[ch->regs.atten & 0x3F];
     if (ch->regs.oct_divisor) freq /= 2.0;
 
     ch->active = 1;
-    ch->incr   = (uint32_t)(freq * ((double)(16u << FRAC_BITS) / M114S_SAMPLE_RATE));
+    ch->freq_hz = freq;
+    ch->incr   = calc_incr(chip, freq);
 
     ch->table1.start_address = (uint32_t)t1start;
     ch->table2.start_address = (uint32_t)t2start;
@@ -345,52 +309,52 @@ static void process_channel_data(void) {
     }
     ch->prev_volume = ch->target_volume;
 
-    read_table(ch);
+    read_table(chip, ch);
 }
 
-void m114s_write(uint8_t data) {
+void m114s_write(M114S *chip, uint8_t data) {
     /* Auto-reset if the gap since the previous byte exceeds the chip's
        programming timeout (128us @ 4MHz) — real M114S behaviour. This also
        naturally absorbs the MS800 firmware's extra channel-select byte
        written to $2000 after each 8-byte program (see bus.c): fed here as
        a stray "byte 1" of a new sequence, it is silently discarded by this
        same auto-reset once real traffic resumes. */
-    if (chip.bytes_read > 0) {
-        uint64_t diff = chip.chip_cycles - chip.last_write_cycle;
-        if ((double)diff > chip.reset_cycles) init_all_channels();
+    if (chip->bytes_read > 0) {
+        uint64_t diff = chip->chip_cycles - chip->last_write_cycle;
+        if ((double)diff > chip->reset_cycles) init_all_channels(chip);
     }
-    chip.last_write_cycle = chip.chip_cycles;
+    chip->last_write_cycle = chip->chip_cycles;
 
     data &= 0x3F;
-    chip.bytes_read++;
-    switch (chip.bytes_read) {
-    case 1: chip.tempch_regs.atten = data; break;
+    chip->bytes_read++;
+    switch (chip->bytes_read) {
+    case 1: chip->tempch_regs.atten = data; break;
     case 2:
-        chip.tempch_regs.table2_addr = (uint8_t)((data & 0x03) << 6);
-        chip.tempch_regs.table1_addr = (uint8_t)((data & 0x0C) << 4);
-        chip.tempch_regs.outputs     = (uint8_t)((data & 0x30) >> 4);
+        chip->tempch_regs.table2_addr = (uint8_t)((data & 0x03) << 6);
+        chip->tempch_regs.table1_addr = (uint8_t)((data & 0x0C) << 4);
+        chip->tempch_regs.outputs     = (uint8_t)((data & 0x30) >> 4);
         break;
-    case 3: chip.tempch_regs.table2_addr |= data; break;
-    case 4: chip.tempch_regs.table1_addr |= data; break;
+    case 3: chip->tempch_regs.table2_addr |= data; break;
+    case 4: chip->tempch_regs.table1_addr |= data; break;
     case 5:
-        chip.tempch_regs.read_meth = data & 0x07;
-        chip.tempch_regs.table_len = (uint8_t)((data & 0x38) >> 3);
+        chip->tempch_regs.read_meth = data & 0x07;
+        chip->tempch_regs.table_len = (uint8_t)((data & 0x38) >> 3);
         break;
     case 6:
-        chip.tempch_regs.oct_divisor = (data & 0x01);
-        chip.tempch_regs.env_enable  = (data & 0x02);
-        chip.tempch_regs.interp      = (uint8_t)((data & 0x3C) >> 2);
+        chip->tempch_regs.oct_divisor = (data & 0x01);
+        chip->tempch_regs.env_enable  = (data & 0x02);
+        chip->tempch_regs.interp      = (uint8_t)((data & 0x3C) >> 2);
         break;
     case 7:
-        chip.tempch_regs.frequency = data & 0x03;
-        chip.channel               = (data & 0x3C) >> 2;
+        chip->tempch_regs.frequency = data & 0x03;
+        chip->channel               = (data & 0x3C) >> 2;
         break;
     case 8:
-        chip.tempch_regs.frequency |= (uint8_t)(data << 2);
-        process_channel_data();
+        chip->tempch_regs.frequency |= (uint8_t)(data << 2);
+        process_channel_data(chip);
         break;
     default:
-        chip.bytes_read = 0;  /* stray extra byte: resync, don't corrupt state */
+        chip->bytes_read = 0;  /* stray extra byte: resync, don't corrupt state */
         break;
     }
 }
@@ -428,69 +392,55 @@ static int64_t step_channel(M114SChannel *ch, uint32_t length) {
 #define PCM_GAIN       (27.75f / 4096.0f)   /* pinmame-derived level */
 #define SHELF_POLE_HZ  975.0
 #define SHELF_ZERO_HZ  2500.0
-#define LPF_ALPHA_Q15  21277   /* ~8kHz one-pole cutoff at 48kHz: round(0.6492*32768) */
-#define DC_BLOCK_R     0.9987f /* ~10Hz at 48kHz */
+/* The reconstruction lowpass and DC blocker were tuned as 48 kHz constants
+   (alpha 21277/32768 ~ 8 kHz, R 0.9987 ~ 10 Hz). Their corner frequencies
+   are kept when the host rate differs; at 48 kHz the constants are exact. */
+#define LPF_ALPHA_48K  (21277.0 / 32768.0)
+#define DC_BLOCK_R_48K 0.9987
 
-typedef struct {
-    float   shelf_x1, shelf_y1;
-    float   dc_x1, dc_y1;
-    int32_t lpf_state;
-} OutputFilter;
-
-static float shelf_b0, shelf_b1, shelf_a1;
-static OutputFilter out_filter[2];
-
-/* Bilinear transform of H(s) = (1 + s/wz) / (1 + s/wp). */
-static void init_output_filter(void) {
-    const double k = 2.0 * M114S_SAMPLE_RATE;
+/* Bilinear transform of H(s) = (1 + s/wz) / (1 + s/wp), plus the 1-pole
+   corner constants, for the current sample rate. */
+static void init_output_filter(M114S *chip) {
+    const double sr = chip->sample_rate;
+    const double k = 2.0 * sr;
     const double wz = 2.0 * 3.14159265358979 * SHELF_ZERO_HZ;
     const double wp = 2.0 * 3.14159265358979 * SHELF_POLE_HZ;
     const double n0 = 1.0 + k / wz, n1 = 1.0 - k / wz;
     const double d0 = 1.0 + k / wp, d1 = 1.0 - k / wp;
-    shelf_b0 = (float)(n0 / d0);
-    shelf_b1 = (float)(n1 / d0);
-    shelf_a1 = (float)(d1 / d0);
-    memset(out_filter, 0, sizeof(out_filter));
+    chip->shelf_b0 = (float)(n0 / d0);
+    chip->shelf_b1 = (float)(n1 / d0);
+    chip->shelf_a1 = (float)(d1 / d0);
+    const double lpf_w = -log(1.0 - LPF_ALPHA_48K) * 48000.0 / sr;
+    chip->lpf_alpha_q15 = (int32_t)lround(32768.0 * (1.0 - exp(-lpf_w)));
+    chip->dc_r = (float)exp(log(DC_BLOCK_R_48K) * 48000.0 / sr);
+    memset(chip->out_filter, 0, sizeof(chip->out_filter));
 }
 
-static int16_t run_output_filter(OutputFilter *f, float x) {
-    float y = shelf_b0 * x + shelf_b1 * f->shelf_x1 - shelf_a1 * f->shelf_y1;
+static int16_t run_output_filter(const M114S *chip, M114SOutputFilter *f, float x) {
+    float y = chip->shelf_b0 * x + chip->shelf_b1 * f->shelf_x1 - chip->shelf_a1 * f->shelf_y1;
     f->shelf_x1 = x;
     f->shelf_y1 = y;
 
-    float dc = y - f->dc_x1 + DC_BLOCK_R * f->dc_y1;
+    float dc = y - f->dc_x1 + chip->dc_r * f->dc_y1;
     f->dc_x1 = y;
     f->dc_y1 = dc;
 
     int32_t accum = (int32_t)dc;
     if (accum < -32768) accum = -32768;
     if (accum >  32767) accum =  32767;
-    f->lpf_state += ((int32_t)LPF_ALPHA_Q15 * (accum - f->lpf_state)) >> 15;
+    f->lpf_state += (chip->lpf_alpha_q15 * (accum - f->lpf_state)) >> 15;
     return (int16_t)f->lpf_state;
 }
 
-void m114s_read_stereo(int16_t out[2]) {
+void m114s_read_stereo(M114S *chip, int16_t out[2]) {
     float side[2] = {0, 0};
     for (int c = 0; c < M114S_CHANNELS; c++) {
-        M114SChannel *ch = &chip.channels[c];
+        M114SChannel *ch = &chip->channels[c];
         if (!ch->active || ch->incr == 0) continue;
         /* Average DAC value over the host sample period. */
         side[(ch->regs.outputs >> 1) & 1] +=
             (float)step_channel(ch, ch->table1.total_length) / (float)ch->incr;
     }
-    out[0] = run_output_filter(&out_filter[0], side[0] * PCM_GAIN);
-    out[1] = run_output_filter(&out_filter[1], side[1] * PCM_GAIN);
-}
-
-int16_t m114s_read_sample(void) {
-    int16_t s[2];
-    m114s_read_stereo(s);
-    return (int16_t)(((int)s[0] + s[1]) / 2);
-}
-
-void m114s_dbg_dump(void) {
-    for (int i = 0; i < M114S_CHANNELS; i++) {
-        if (chip.channels[i].active)
-            fprintf(stderr, "    m114s ch%02d ACTIVE\n", i);
-    }
+    out[0] = run_output_filter(chip, &chip->out_filter[0], side[0] * PCM_GAIN);
+    out[1] = run_output_filter(chip, &chip->out_filter[1], side[1] * PCM_GAIN);
 }

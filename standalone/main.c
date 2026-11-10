@@ -3,11 +3,9 @@
  *
  * Usage: ./ms800-emu [--trace]
  *
- * CPU:   SY6502 @ 2MHz (public-domain fake6502 core)
- * Sound: SGS-Thomson M114S, 16 channels (ported from vpinball/pinmame)
- * MIDI:  6850 ACIA, bit-accurate @ 31,250 baud (ported from MAME);
- *        CoreMIDI virtual port "MS800" on macOS
- * UI:    SDL2, laid out against a real front-panel photograph
+ * Standalone host for the ms800 core library (core/include/ms800.h):
+ * SDL2 audio and front panel, CoreMIDI virtual ports "MS800" (in) and
+ * "MS800 Out" on macOS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,71 +19,33 @@
 #  include <CoreFoundation/CoreFoundation.h>
 #endif
 
-#include "fake6502.h"
-#include "bus.h"
-#include "acia6850.h"
-#include "m114s.h"
+#include "ms800.h"
 #include "ui_panel.h"
 
-#define CPU_HZ         2000000
 #define SAMPLE_RATE    48000
-#define IRQ_HZ         3770               /* firmware timer tick ($E1EE). Measured
-                                              against a real unit: P6's crossfade loop
-                                              (4 x 128 ticks) repeats every 133.7 ms,
-                                              and factory decays (+4 attenuation per
-                                              64 ticks) end notes after ~250 ms as on
-                                              hardware. The earlier 500 Hz guess made
-                                              modulation ~7x too slow. */
-#define CYCLES_PER_IRQ (CPU_HZ / IRQ_HZ)
 
 #define PROG_ROM_PATH "roms/ms800-10-prog.bin"
 #define WAVE_ROM_PATH "roms/ms800-waveform-rom.bin"
 
 static int trace_m114s = 0;
 static int powered_on = 1;
-
-/* ── CPU/ACIA/IRQ scheduling ────────────────────────────────────────────── */
-static int64_t irq_countdown = CYCLES_PER_IRQ;
-static int     last_acia_irq = 0;
-
-static void run_cpu(int cycles) {
-    while (cycles > 0 && powered_on) {
-        exec6502(1);                 /* runs exactly one instruction */
-        uint32_t done = clockticks6502;
-        for (uint32_t i = 0; i < done; i++) acia_clock_edge();
-        bus_advance_cycles((int)done);
-        cycles -= (int)done;
-
-        irq_countdown -= done;
-        if (irq_countdown <= 0) { irq_countdown += CYCLES_PER_IRQ; irq6502(); }
-
-        int asserted = acia_irq_asserted();
-        if (asserted && !last_acia_irq) nmi6502();
-        last_acia_irq = asserted;
-    }
-}
+static ms800_t *machine;
 
 /* ── Audio callback ─────────────────────────────────────────────────────── */
-static int64_t sample_accum = 0;
 static void audio_callback(void *userdata, Uint8 *stream, int len) {
     (void)userdata;
     int16_t *out = (int16_t *)stream;
     int frames = len / 4;   /* stereo S16 */
-    for (int i = 0; i < frames; i++) {
-        if (!powered_on) { out[2*i] = out[2*i+1] = 0; continue; }
-        sample_accum += CPU_HZ;
-        int cpu_cycles = (int)(sample_accum / SAMPLE_RATE);
-        sample_accum %= SAMPLE_RATE;
-        run_cpu(cpu_cycles);
-        m114s_read_stereo(&out[2*i]);
-    }
+    if (!powered_on) { memset(out, 0, (size_t)len); return; }
+    ms800_render_s16(machine, out, frames);
 }
 
 /* ── MIDI TX (emulator -> real world) ───────────────────────────────────── */
 #define TXQ_SIZE 256
 static uint8_t txq[TXQ_SIZE];
 static volatile int txq_head = 0, txq_tail = 0;
-static void on_acia_tx_byte(uint8_t b) {
+static void on_midi_out(void *user, uint8_t b) {
+    (void)user;
     int next = (txq_tail + 1) % TXQ_SIZE;
     if (next != txq_head) { txq[txq_tail] = b; txq_tail = next; }
 }
@@ -106,15 +66,15 @@ static void midi_read_proc(const MIDIPacketList *pktList, void *refcon, void *sr
             uint8_t b = pkt->data[j];
             if (b & 0x80) {
                 last_status = b;
-                acia_rx_push(b);
+                ms800_midi_in(machine, b);
             } else if ((last_status & 0xF0) == 0xC0) {
                 /* Program Change: firmware patch numbers are 1-50 (0 disables
                    the channel); standard MIDI sends 0-127. */
                 uint8_t prog = (uint8_t)(b + 1);
                 if (prog > 50) prog = 50;
-                acia_rx_push(prog);
+                ms800_midi_in(machine, prog);
             } else {
-                acia_rx_push(b);
+                ms800_midi_in(machine, b);
             }
         }
         pkt = MIDIPacketNext(pkt);
@@ -213,17 +173,19 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++)
         if (strcmp(argv[i], "--trace") == 0) trace_m114s = 1;
 
+    setvbuf(stdout, NULL, _IOLBF, 0);   /* show messages promptly when not on a terminal */
     printf("MS800 Emulator\n");
 
-    uint8_t *prog_rom = load_rom(PROG_ROM_PATH, 8192);
-    uint8_t *wave_rom = load_rom(WAVE_ROM_PATH, 32768);
+    uint8_t *prog_rom = load_rom(PROG_ROM_PATH, MS800_PROG_ROM_SIZE);
+    uint8_t *wave_rom = load_rom(WAVE_ROM_PATH, MS800_WAVE_ROM_SIZE);
     if (!prog_rom || !wave_rom) return 1;
 
-    bus_init(prog_rom, 8192, wave_rom, 32768);
-    m114s_debug(trace_m114s);
-    acia_set_tx_byte_callback(on_acia_tx_byte);
-    reset6502();
-    printf("CPU reset, PC = $%04X\n", pc);
+    machine = ms800_create(prog_rom, MS800_PROG_ROM_SIZE, wave_rom, MS800_WAVE_ROM_SIZE, SAMPLE_RATE);
+    free(prog_rom);
+    free(wave_rom);
+    if (!machine) { fprintf(stderr, "Cannot create the MS800 machine\n"); return 1; }
+    ms800_set_trace(machine, trace_m114s);
+    ms800_set_midi_out(machine, on_midi_out, NULL);
 
     midi_init();
 
@@ -261,20 +223,20 @@ int main(int argc, char **argv) {
                 int btn = 0;
                 if (k >= SDLK_1 && k <= SDLK_9) btn = (int)(k - SDLK_1) + 1;
                 else if (k == SDLK_0)           btn = 10;
-                if (btn) bus_button_state[btn] = down;
+                if (btn) ms800_set_button(machine, btn, down);
             }
             if (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP) {
                 int down = (ev.type == SDL_MOUSEBUTTONDOWN);
                 int mx = ev.button.x, my = ev.button.y;
                 if (down && ui_panel_hit_test_power(mx, my)) powered_on = !powered_on;
                 int btn = ui_panel_hit_test_button(mx, my);
-                if (btn) bus_button_state[btn] = down;
+                if (btn) ms800_set_button(machine, btn, down);
             }
         }
 
         midi_flush_tx();
 
-        ui_panel_draw(ren, powered_on ? panel_display : 0, powered_on);
+        ui_panel_draw(ren, machine, powered_on ? ms800_display(machine) : 0, powered_on);
         SDL_RenderPresent(ren);
         SDL_Delay(16);
     }
@@ -285,7 +247,6 @@ int main(int argc, char **argv) {
     SDL_CloseAudioDevice(dev);
     SDL_Quit();
 
-    free(prog_rom);
-    free(wave_rom);
+    ms800_destroy(machine);
     return 0;
 }
