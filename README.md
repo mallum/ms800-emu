@@ -4,7 +4,7 @@
 
 An emulator for the **Cheetah MS800** digital wave synthesizer from 1987:
 a 6502 running the original firmware, the SGS-Thomson M114S wavetable chip,
-a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Claude with real hardware (pcb photos, sound A/B'ing etc) as a reference.
+a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Claude and real hardware (pcb photos, sound A/B'ing etc) as a reference.
 
 - Runs the real v1.0 firmware ROM; MIDI in/out via CoreMIDI (appears as **MS800**
   and **MS800 Out**).
@@ -14,7 +14,7 @@ a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Cl
   a real unit.
 - Clickable front panel; keys `1`–`9`/`0` press the panel buttons, Space toggles power.
 
-Requires copies of the original program and wavetable ROMs to run. 
+Requires copies of the original program and wavetable ROMs to run (not included here!).
 
 ## Building (macOS)
 
