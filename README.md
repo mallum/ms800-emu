@@ -4,17 +4,17 @@
 
 An emulator for the **Cheetah MS800** digital wave synthesizer from 1987:
 a 6502 running the original firmware, the SGS-Thomson M114S wavetable chip,
-a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Claude. 
+a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Claude with real hardware (pcb photos, sound A/B'ing etc) as a reference.
 
 - Runs the real v1.0 firmware ROM; MIDI in/out via CoreMIDI (appears as **MS800**
   and **MS800 Out**).
 - M114S playback of the 8-bit PCM wave ROM, including the MS800's PCB waveform
-  address mapper, dual-table crossfades and stereo outputs (pin 0 = left, pin 2 = right).
+  address mapper, dual-table crossfades and stereo outputs.
 - Timer rate, attenuation curve and output filtering are fitted to recordings of
   a real unit.
 - Clickable front panel; keys `1`–`9`/`0` press the panel buttons, Space toggles power.
 
-Requires copies of the original program and wave Roms to run. 
+Requires copies of the original program and wavetable ROMs to run. 
 
 ## Building (macOS)
 
@@ -26,7 +26,7 @@ cmake --build build
 ./build/ms800-emu
 ```
 
-The panel artwork is compiled into the binary. To regenerate it:
+The panel artwork is compiled into the binary. To regenerate it (if needed):
 
 ```sh
 python3 -m pip install pillow
