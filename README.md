@@ -1,6 +1,6 @@
 # MS800 emulator
 
-![MS800](https://raw.githubusercontent.com/mallum/ms800-emu/main/ms800-emu.png)
+![MS800](ms800-emu.png)
 
 An emulator for the **Cheetah MS800** digital wave synthesizer from 1987:
 a 6502 running the original firmware, the SGS-Thomson M114S wavetable chip,
@@ -23,7 +23,7 @@ brew install cmake sdl2
 # put the ROM dumps in roms/ (see roms/README.md)
 cmake -S . -B build
 cmake --build build
-./build/ms800-emu2
+./build/ms800-emu
 ```
 
 The panel artwork is compiled into the binary. To regenerate it:

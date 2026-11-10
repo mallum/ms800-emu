@@ -17,7 +17,7 @@ Outputs (all in logical 1x units scaled by ART_SCALE):
   src/panel_layout.h    coordinates shared with ui_panel.c
 
 Needs Pillow:  python3 -m pip install pillow
-Run from the ms800-emu2 directory:  python3 tools/gen_panel_art.py
+Run from the repository root:  python3 tools/gen_panel_art.py
 """
 import os, random
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops

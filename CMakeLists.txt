@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ms800-emu2 C)
+project(ms800-emu C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -O2")
@@ -31,29 +31,29 @@ foreach(art panel sprites)
     list(APPEND EMBEDDED ${out})
 endforeach()
 
-add_executable(ms800-emu2 ${SOURCES} ${EMBEDDED})
+add_executable(ms800-emu ${SOURCES} ${EMBEDDED})
 
-target_include_directories(ms800-emu2 PRIVATE
+target_include_directories(ms800-emu PRIVATE
     src
     ${SDL2_INCLUDE_DIRS}
 )
 
-target_link_libraries(ms800-emu2 PRIVATE
+target_link_libraries(ms800-emu PRIVATE
     ${SDL2_LIBRARIES}
     m
 )
 
 if(APPLE)
-    target_link_libraries(ms800-emu2 PRIVATE
+    target_link_libraries(ms800-emu PRIVATE
         "-framework CoreMIDI"
         "-framework CoreFoundation"
     )
-    target_compile_definitions(ms800-emu2 PRIVATE __APPLE__)
+    target_compile_definitions(ms800-emu PRIVATE __APPLE__)
 endif()
 
-add_custom_command(TARGET ms800-emu2 POST_BUILD
+add_custom_command(TARGET ms800-emu POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/roms
-        $<TARGET_FILE_DIR:ms800-emu2>/roms
+        $<TARGET_FILE_DIR:ms800-emu>/roms
     COMMENT "Copying ROMs to build directory"
 )
