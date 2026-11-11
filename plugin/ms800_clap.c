@@ -100,6 +100,7 @@ typedef struct {
     double             sample_rate;
     atomic_flag        lock;       /* guards m between process and state calls */
     atomic_int         power;      /* the panel's power switch: 0 = off, silent */
+    int                was_on;     /* power as process() last saw it (audio thread) */
 #ifdef __APPLE__
     ms800_gui         *gui;
 #endif
@@ -329,10 +330,18 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin, const cla
         /* No ROMs, or switched off: silent, and the machine doesn't run. */
         if (left) memset(left, 0, frames * sizeof(float));
         if (right) memset(right, 0, frames * sizeof(float));
+        p->was_on = 0;
         return p->m ? CLAP_PROCESS_CONTINUE : CLAP_PROCESS_SLEEP;
     }
 
     lock(p);
+    if (!p->was_on) {
+        /* Switched back on: everything but the battery-backed RAM starts
+           afresh, which gets the firmware out of a lockup as on a real unit. */
+        ms800_power_cycle(p->m);
+        fast_boot(p);
+        p->was_on = 1;
+    }
     p->out_events = process->out_events;
     p->sysex_len = 0;
     if (p->out_sysex_start >= 0) p->out_sysex_start = -1;   /* SysEx can't span blocks */
@@ -599,6 +608,7 @@ static const clap_plugin_t *factory_create(const clap_plugin_factory_t *f, const
     p->host = host;
     p->out_sysex_start = -1;
     atomic_init(&p->power, 1);
+    p->was_on = 1;
     atomic_flag_clear(&p->lock);
     p->plugin = (clap_plugin_t){
         .desc = &descriptor,

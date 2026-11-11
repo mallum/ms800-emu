@@ -47,6 +47,10 @@ typedef struct {
 
 void acia_init(ACIA *a);
 void acia_reset(ACIA *a);            /* power-on / master-reset defaults */
+/* Full power cycle: every register and the bit serialisers back to their
+   power-on state, and queued MIDI input discarded. Call from the emulation
+   thread; the queue's producer may keep running. */
+void acia_power_on(ACIA *a);
 
 void    acia_write_ctrl(ACIA *a, uint8_t v);
 void    acia_write_data(ACIA *a, uint8_t v);

@@ -67,6 +67,14 @@ void     ms800_destroy(ms800_t *m);
 /* CPU reset, as at power-on. RAM is kept (it is battery-backed). */
 void     ms800_reset(ms800_t *m);
 
+/* Switch off and on again, as with the real power switch: every chip returns
+   to its power-on state, queued MIDI input is dropped and the CPU resets.
+   The battery-backed RAM (all 8 KB) is kept, so patches survive and the
+   firmware warm-starts on the patch it was on. This gets the firmware out of
+   a lockup, as on a real unit; to start from blank memory as well, clear it
+   with ms800_set_ram() first. Front-panel buttons held at the time stay held. */
+void     ms800_power_cycle(ms800_t *m);
+
 void     ms800_set_sample_rate(ms800_t *m, double sample_rate);
 
 /* Queue one raw MIDI byte for the ACIA (status and data bytes as on the

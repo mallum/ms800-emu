@@ -7,6 +7,7 @@
  * plumbing has been replaced. See acia6850.h.
  */
 #include "acia6850.h"
+#include <stddef.h>
 #include <string.h>
 
 enum {
@@ -261,14 +262,28 @@ static void rx_serializer_step(ACIA *a) {
 }
 
 /* ── Public entry points ─────────────────────────────────────────────────── */
-void acia_init(ACIA *a) {
-    memset(a, 0, sizeof(*a));
-    atomic_init(&a->rxq_head, 0);
-    atomic_init(&a->rxq_tail, 0);
+/* Chip state as at power-on. Leaves the MIDI-in queue and TX callback alone. */
+static void init_chip(ACIA *a) {
+    memset(a, 0, offsetof(ACIA, rxq));
     a->first_master_reset = 1;
     write_dcd(a, 0);   /* MS800 ties DCD low: no carrier-detect signalling on a MIDI UART */
     write_cts(a, 0);   /* and CTS low: always clear to send */
     acia_reset(a);
+}
+
+void acia_init(ACIA *a) {
+    memset(a, 0, sizeof(*a));
+    atomic_init(&a->rxq_head, 0);
+    atomic_init(&a->rxq_tail, 0);
+    init_chip(a);
+}
+
+void acia_power_on(ACIA *a) {
+    /* Drop queued input from the consumer side, so a producer thread can
+       keep pushing meanwhile. */
+    atomic_store_explicit(&a->rxq_head, atomic_load_explicit(&a->rxq_tail, memory_order_acquire),
+                          memory_order_release);
+    init_chip(a);
 }
 
 void acia_reset(ACIA *a) {

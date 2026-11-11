@@ -13,6 +13,8 @@ a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Cl
 - Timer rate, attenuation curve and output filtering are fitted to recordings of
   a real unit.
 - Clickable front panel; keys `1`–`9`/`0` press the panel buttons, Space toggles power.
+  Switching off and on again resets the machine but keeps its battery-backed
+  memory, as on the real unit; that gets the firmware out of a lockup.
 
 Requires copies of the original program and wavetable ROMs to run (not included here!).
 
@@ -53,6 +55,8 @@ The plugin is an instrument with a stereo output, a MIDI input and a MIDI
 output (whatever the firmware transmits, such as SysEx bank dumps). Its editor
 is the front panel: click the buttons, watch the display, use the power switch.
 The battery-backed RAM (user patches and setup) is saved with the host project.
+Switching off and on again resets the machine and keeps that memory, as on
+the real unit.
 Host program 1 selects patch 1 (the firmware's own numbering is offset by one).
 
 ROMs are not built in. The plugin looks for `ms800-10-prog.bin` and

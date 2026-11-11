@@ -179,6 +179,13 @@ void ms800_reset(ms800_t *m) {
     cpu6502_leave(&m->cpu);
 }
 
+void ms800_power_cycle(ms800_t *m) {
+    atomic_store_explicit(&m->display, 0, memory_order_relaxed);
+    m114s_init(&m->chip, m->wave_rom, MS800_WAVE_ROM_SIZE, M114S_HZ, m->sample_rate);
+    acia_power_on(&m->acia);
+    ms800_reset(m);
+}
+
 void ms800_set_sample_rate(ms800_t *m, double sample_rate) {
     if (sample_rate <= 0) return;
     m->sample_rate = sample_rate;

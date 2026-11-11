@@ -28,7 +28,7 @@
 #define WAVE_ROM_PATH "roms/ms800-waveform-rom.bin"
 
 static int trace_m114s = 0;
-static int powered_on = 1;
+static volatile int powered_on = 1;   /* the panel's power switch */
 static ms800_t *machine;
 
 /* ── Audio callback ─────────────────────────────────────────────────────── */
@@ -36,7 +36,14 @@ static void audio_callback(void *userdata, Uint8 *stream, int len) {
     (void)userdata;
     int16_t *out = (int16_t *)stream;
     int frames = len / 4;   /* stereo S16 */
-    if (!powered_on) { memset(out, 0, (size_t)len); return; }
+    static int was_on = 1;
+    if (!powered_on) { memset(out, 0, (size_t)len); was_on = 0; return; }
+    if (!was_on) {
+        /* Switched back on: everything but the battery-backed RAM starts
+           afresh, which gets the firmware out of a lockup as on a real unit. */
+        ms800_power_cycle(machine);
+        was_on = 1;
+    }
     ms800_render_s16(machine, out, frames);
 }
 
