@@ -18,13 +18,13 @@ a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Cl
 
 Requires copies of the original program and wavetable ROMs to run (not supplied!).
 
-Original manual
-https://www.polynominal.com/cheetah-ms800/cheetah-Ms800-Manual.pdf
+Original manual: \
+https://www.polynominal.com/cheetah-ms800/cheetah-Ms800-Manual.pdf  
 
-Useful videos
-https://www.youtube.com/watch?v=Cm4e2EH72DQ
-https://www.youtube.com/watch?v=QwOQ1zqY8sQ
-https://www.youtube.com/watch?v=jqS8ORBhGGw
+Useful videos on ms800: \
+https://www.youtube.com/watch?v=Cm4e2EH72DQ \ 
+https://www.youtube.com/watch?v=QwOQ1zqY8sQ \ 
+https://www.youtube.com/watch?v=jqS8ORBhGGw \
 
 ## Building (macOS)
 
