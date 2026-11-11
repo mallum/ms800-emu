@@ -22,9 +22,9 @@ Original manual: \
 https://www.polynominal.com/cheetah-ms800/cheetah-Ms800-Manual.pdf  
 
 Useful videos on ms800: \
-https://www.youtube.com/watch?v=Cm4e2EH72DQ \ 
-https://www.youtube.com/watch?v=QwOQ1zqY8sQ \ 
-https://www.youtube.com/watch?v=jqS8ORBhGGw \
+https://www.youtube.com/watch?v=Cm4e2EH72DQ
+<br>https://www.youtube.com/watch?v=QwOQ1zqY8sQ 
+<br>https://www.youtube.com/watch?v=jqS8ORBhGGw
 
 ## Building (macOS)
 
