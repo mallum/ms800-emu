@@ -14,9 +14,17 @@ a 6850 ACIA for MIDI, and the front panel. Slop coded as a fun adventure with Cl
   a real unit.
 - Clickable front panel; keys `1`–`9`/`0` press the panel buttons, Space toggles power.
   Switching off and on again resets the machine but keeps its battery-backed
-  memory, as on the real unit; that gets the firmware out of a lockup.
+  memory, as on the real unit; that gets the firmware out of a lockup (of which, like a real unit, it may do particularly when editing user patches numbered 51+)
 
-Requires copies of the original program and wavetable ROMs to run (not included here!).
+Requires copies of the original program and wavetable ROMs to run (not supplied!).
+
+Original manual
+https://www.polynominal.com/cheetah-ms800/cheetah-Ms800-Manual.pdf
+
+Useful videos
+https://www.youtube.com/watch?v=Cm4e2EH72DQ
+https://www.youtube.com/watch?v=QwOQ1zqY8sQ
+https://www.youtube.com/watch?v=jqS8ORBhGGw
 
 ## Building (macOS)
 
